@@ -70,11 +70,16 @@ async function loadONNXModel() {
     const modelStatus = document.getElementById('model-status');
     try {
         console.log("Loading ONNX Model...");
-        // Set environment variables for web backend
+        
+        // Redirect WASM binaries fetch paths directly to CDN to avoid local MIME type or hosting issues
+        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
         ort.env.wasm.numThreads = 1;
         
-        // Load the session
-        session = await ort.InferenceSession.create('./global_model.onnx');
+        // Load session prioritizing WebGL (GPU-accelerated, avoids WASM fetch completely) with WebAssembly fallback
+        session = await ort.InferenceSession.create('./global_model.onnx', {
+            executionProviders: ['webgl', 'wasm']
+        });
+        
         modelStatus.textContent = "Model Online 🟢";
         modelStatus.style.color = "var(--color-success)";
         console.log("ONNX model loaded successfully!");
