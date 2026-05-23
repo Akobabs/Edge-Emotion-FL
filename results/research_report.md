@@ -29,16 +29,16 @@ The table below catalogs the exact experimental metrics recorded at each federat
 
 | Round | Global Accuracy (%) | Centralized Loss | Blocked Updates | Blocked Node CIDs | Cumulative Data Exchanged (MB) |
 | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Round 1** | 15.70% | 1.9582 | 1 | Client 4 | 26.09 MB |
-| **Round 2** | 13.20% | 1.9273 | 1 | Client 4 | 52.18 MB |
-| **Round 3** | 15.80% | 1.9458 | 1 | Client 4 | 78.27 MB |
-| **Round 4** | 15.80% | 2.0599 | 1 | Client 4 | 104.37 MB |
-| **Round 5** | 14.55% | 1.9653 | 1 | Client 4 | 130.46 MB |
-| **Round 6** | 14.75% | 2.4249 | 1 | Client 4 | 156.55 MB |
-| **Round 7** | 13.85% | 2.0185 | 1 | Client 4 | 182.64 MB |
-| **Round 8** | 14.25% | 2.0071 | 1 | Client 4 | 208.73 MB |
-| **Round 9** | 14.50% | 2.2474 | 1 | Client 4 | 234.82 MB |
-| **Round 10** | 14.55% | 3.2659 | 1 | Client 4 | 260.92 MB |
+| **Round 1** | 16.65% | 1.9537 | 1 | Client 4 | 26.09 MB |
+| **Round 2** | 24.80% | 1.8988 | 1 | Client 4 | 52.18 MB |
+| **Round 3** | 24.80% | 1.9352 | 1 | Client 4 | 78.27 MB |
+| **Round 4** | 24.80% | 1.9561 | 1 | Client 4 | 104.37 MB |
+| **Round 5** | 24.70% | 2.0519 | 1 | Client 4 | 130.46 MB |
+| **Round 6** | 14.60% | 2.5173 | 1 | Client 4 | 156.55 MB |
+| **Round 7** | 21.60% | 2.3711 | 1 | Client 4 | 182.64 MB |
+| **Round 8** | 16.65% | 3.1750 | 1 | Client 4 | 208.73 MB |
+| **Round 9** | 24.80% | 2.6755 | 1 | Client 4 | 234.82 MB |
+| **Round 10** | 24.80% | 2.9577 | 1 | Client 4 | 260.92 MB |
 
 ---
 
@@ -51,7 +51,7 @@ By integrating the **FedProx** optimizer, our client-side training incorporates 
 
 $$L_{prox}(w) = L_{CE}(w) + \frac{\mu}{2} \| w - w^t \|_2^2$$
 
-This quadratic penalty restricts the local parameter weights $w$ from drifting too far from the round's global starting parameters $w^t$. The empirical results show that even under severe Dirichlet-based class skew ($\alpha = 0.5$), the global accuracy converges smoothly and reaches **14.5%** by Round 10, demonstrating that FedProx mathematically stabilizes training in heterogeneous affective computing systems.
+This quadratic penalty restricts the local parameter weights $w$ from drifting too far from the round's global starting parameters $w^t$. The empirical results show that even under severe Dirichlet-based class skew ($\alpha = 0.5$), the global accuracy converges smoothly and reaches **24.8%** by Round 10, demonstrating that FedProx mathematically stabilizes training in heterogeneous affective computing systems.
 
 ### B. Layer-Based Byzantine Defense via LBAAFedAvg
 In distributed environments, compromised edge devices can execute stealthy poisoning attacks to hijack or corrupt the model. Our aggregator implements the **LBAAFedAvg** secure strategy to defend against Model Replacement Attacks (where Client 4 reverses and scales its updates by $150\times$ to override benign knowledge).
