@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy-Conscious Federated Emotion Recognition</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- ONNX Runtime Web for Browser Inference -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <!-- Chart.js for High-Fidelity Data Plotting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <span class="logo-icon">🧠</span>
+            <h1>FEDERATED EMOTION LEARNING</h1>
+        </div>
+        <p class="subtitle">Secure Distributed Edge Intelligence & Interactive Demonstration</p>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-container">
+        <button class="tab-btn active" id="tab-webcam" onclick="switchTab('webcam')">
+            <span>📹</span> Live Webcam Mode
+        </button>
+        <button class="tab-btn" id="tab-dashboard" onclick="switchTab('dashboard')">
+            <span>📊</span> Metrics Dashboard
+        </button>
+    </div>
+
+    <!-- TAB 1: WEBCAM MODE -->
+    <div id="content-webcam" class="tab-content active">
+        <div class="webcam-grid">
+            <!-- Left Side: Camera Viewport -->
+            <div class="glass-panel viewport-card">
+                <div class="scanner-viewport">
+                    <video id="webcam-video" autoplay playsinline muted></video>
+                    <!-- Floating scanning bounding box and laser line -->
+                    <div class="scan-overlay">
+                        <div class="scan-line"></div>
+                    </div>
+                    <!-- Camera Status -->
+                    <div class="status-bar">
+                        <div class="status-left">
+                            <span class="status-dot" id="camera-dot"></span>
+                            <span id="camera-status">Camera Offline</span>
+                        </div>
+                        <div class="status-right">
+                            <span id="model-status">Model Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Classification Outputs -->
+            <div class="glass-panel results-panel">
+                <div class="primary-emotion-card">
+                    <div class="emotion-text-group">
+                        <span class="label-title">Detected Emotion</span>
+                        <span id="detected-emotion">--</span>
+                    </div>
+                    <div class="confidence-badge" id="confidence-val">0%</div>
+                </div>
+
+                <!-- 7 Class Confidence Bars -->
+                <div class="bars-container">
+                    <!-- Angry -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Angry 😡</span>
+                            <span class="bar-value" id="val-angry">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-angry" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Disgust -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Disgust 🤢</span>
+                            <span class="bar-value" id="val-disgust">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-disgust" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Fear -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Fear 😨</span>
+                            <span class="bar-value" id="val-fear">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-fear" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Happy -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Happy 😊</span>
+                            <span class="bar-value" id="val-happy">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-happy" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Sad -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Sad 😢</span>
+                            <span class="bar-value" id="val-sad">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-sad" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Surprise -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Surprise 😲</span>
+                            <span class="bar-value" id="val-surprise">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-surprise" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Neutral -->
+                    <div class="bar-row">
+                        <div class="bar-labels">
+                            <span class="bar-name">Neutral 😐</span>
+                            <span class="bar-value" id="val-neutral">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="fill-neutral" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Privacy & System Info Box -->
+        <div class="glass-panel instructions-panel">
+            <h4>🔒 Zero-Latency On-Device Privacy Guaranteed</h4>
+            <p>
+                In standard centralized machine learning, raw webcam images are streamed to the cloud, introducing 
+                severe privacy vulnerabilities and network latency. In this demonstration layer, the trained global 
+                emotion classification model runs **entirely client-side** in your browser using **ONNX Runtime Web**. 
+                No image pixels leave your local computer. Your facial expressions are processed locally, instantly, 
+                and securely.
+            </p>
+        </div>
+    </div>
+
+    <!-- TAB 2: METRICS DASHBOARD -->
+    <div id="content-dashboard" class="tab-content">
+        <!-- Stats Summary Bar -->
+        <div class="dashboard-grid">
+            <div class="glass-panel stat-card">
+                <div class="stat-title">Global Accuracy</div>
+                <div class="stat-val primary" id="stat-accuracy">--</div>
+            </div>
+            <div class="glass-panel stat-card">
+                <div class="stat-title">Rounds Completed</div>
+                <div class="stat-val secondary" id="stat-rounds">--</div>
+            </div>
+            <div class="glass-panel stat-card">
+                <div class="stat-title">Attacks Blocked (LBAA)</div>
+                <div class="stat-val danger" id="stat-blocked">--</div>
+            </div>
+            <div class="glass-panel stat-card">
+                <div class="stat-title">Comm Saved (Overhead)</div>
+                <div class="stat-val success" id="stat-overhead">--</div>
+            </div>
+        </div>
+
+        <!-- Chart Columns -->
+        <div class="charts-grid">
+            <!-- Chart 1: Global Convergence -->
+            <div class="glass-panel chart-card">
+                <h3>Global Convergence (Accuracy & Loss)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="chart-convergence"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 2: Security & Defenses -->
+            <div class="glass-panel chart-card">
+                <h3>Adversarial Defense (LBAAFedAvg Block Count)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="chart-security"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-panel instructions-panel" style="border-left-color: var(--color-secondary);">
+            <h4>🛡️ Research Highlights: Handling Heterogeneity & Defending Privacy</h4>
+            <p>
+                The charts above demonstrate the key research achievements of the simulation. By applying **FedProx** 
+                on client nodes, the global model converges smoothly despite highly Non-IID emotional data. Crucially, 
+                our server-side **LBAAFedAvg** filter successfully flags and discards anomalous weights submitted by 
+                compromised clients in every round, protecting the global model from stealth poisoning attacks without 
+                degrading benign accuracy!
+            </p>
+        </div>
+    </div>
+
+    <!-- Setup instructions shown if simulation_history.json is missing or server is double-clicked -->
+    <div id="cors-warning" class="glass-panel instructions-panel" style="display: none; border-left-color: var(--color-warning); margin: 2rem auto; max-width: 1200px;">
+        <h4 style="color: var(--color-warning);">⚠️ CORS Policy Warning / Local Server Required</h4>
+        <p>
+            Browsers block file loading via the `file://` protocol due to security policies. To see real-time webcam inference and load simulation charts, please start a quick local server in this directory:
+            <br>
+            <code style="font-family: var(--font-mono); color: var(--text-main); background: rgba(0,0,0,0.3); padding: 0.2rem 0.5rem; display: inline-block; margin-top: 0.5rem; border-radius: 4px;">
+                python -m http.server 8000
+            </code>
+            <br>
+            Then open <a href="http://localhost:8000" target="_blank" style="color: var(--color-primary); font-weight: bold;">http://localhost:8000</a> in your web browser.
+        </p>
+    </div>
+
+    <!-- Application Javascript Logic -->
+    <script src="app.js"></script>
+</body>
+</html>
