@@ -72,7 +72,7 @@ async function loadONNXModel() {
         console.log("Loading ONNX Model...");
         
         // Redirect WASM binaries fetch paths directly to CDN to avoid local MIME type or hosting issues
-        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/';
         ort.env.wasm.numThreads = 1;
         
         // Load session prioritizing WebGL (GPU-accelerated, avoids WASM fetch completely) with WebAssembly fallback
