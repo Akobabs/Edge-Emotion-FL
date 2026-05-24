@@ -42,14 +42,15 @@ def export_to_onnx(pth_path="backend/global_model.pth", onnx_path="frontend/glob
         dummy_input,                # Model input (or a tuple for multiple inputs)
         onnx_path,                  # Where to save the model
         export_params=True,         # Store the trained parameter weights inside the model file
-        opset_version=16,           # The ONNX version to export the model to (opset 15/16/18 are modern standards)
+        opset_version=12,           # The ONNX version to export the model to (11 or 12 are widely compatible)
         do_constant_folding=True,   # Whether to execute constant folding for optimization
         input_names=['input'],      # The model's input names
         output_names=['output'],    # The model's output names
         dynamic_axes={              # Variable length axes (enables flexible batch sizing)
             'input': {0: 'batch_size'},
             'output': {0: 'batch_size'}
-        }
+        },
+        dynamo=False                # Disable dynamo exporter to bundle weights inside the .onnx file directly
     )
     
     print("ONNX model export complete!")
