@@ -29,8 +29,8 @@ def export_to_onnx(pth_path="backend/global_model.pth", onnx_path="frontend/glob
     model.eval()
     
     # 4. Define dummy input matching model specifications (BatchSize, Channel, Height, Width)
-    # FER-2013 uses 48x48 grayscale (1 channel) images
-    dummy_input = torch.randn(1, 1, 48, 48, requires_grad=False)
+    # Input resized to 64×64 to match mini_XCEPTION architecture
+    dummy_input = torch.randn(1, 1, 64, 64, requires_grad=False)
     
     # 5. Create output directory if not exists
     os.makedirs(onnx_path, exist_ok=True) if os.path.isdir(onnx_path) else os.makedirs(os.path.dirname(onnx_path), exist_ok=True)
