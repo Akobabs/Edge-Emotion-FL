@@ -1,65 +1,95 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+
+class SeparableConv2d(nn.Module):
+    """Depthwise + pointwise conv — PyTorch equivalent of Keras SeparableConv2D."""
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, bias=False):
+        super().__init__()
+        self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size,
+                                   padding=padding, groups=in_channels, bias=bias)
+        self.pointwise = nn.Conv2d(in_channels, out_channels, 1, bias=bias)
+
+    def forward(self, x):
+        return self.pointwise(self.depthwise(x))
+
+
+class XceptionModule(nn.Module):
+    """
+    Single XCEPTION module: residual 1×1 stride-2 shortcut + [SepConv→BN→ReLU→SepConv→BN→MaxPool].
+    Spatial dimension is halved by the stride-2 MaxPool + matching stride-2 shortcut.
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.sep1 = SeparableConv2d(in_channels, out_channels)
+        self.bn1  = nn.BatchNorm2d(out_channels)
+        self.sep2 = SeparableConv2d(out_channels, out_channels)
+        self.bn2  = nn.BatchNorm2d(out_channels)
+        self.pool = nn.MaxPool2d(3, stride=2, padding=1)
+        self.skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 1, stride=2, bias=False),
+            nn.BatchNorm2d(out_channels),
+        )
+
+    def forward(self, x):
+        residual = self.skip(x)
+        x = F.relu(self.bn1(self.sep1(x)), inplace=True)
+        x = self.bn2(self.sep2(x))
+        x = self.pool(x)
+        return F.relu(x + residual, inplace=True)
+
 
 class EmotionCNN(nn.Module):
     """
-    Lightweight 3-layer Convolutional Neural Network (CNN) for Facial Emotion Recognition (FER).
-    Inputs: Grayscale images of shape (Batch, 1, 48, 48)
-    Outputs: Raw classification logits of shape (Batch, 7) representing the emotion categories.
+    PyTorch port of mini_XCEPTION (oarriaga/face_classification, ~65-66% on FER-2013).
+    Input: (B, 1, 64, 64)  |  Output logits: (B, 7)
+
+    Architecture (spatial dims with 64×64 input):
+      Base:    Conv(1→8, valid)  → Conv(8→8, valid)           → 60×60
+      Block 1: XceptionModule(8→16)   stride-2 MaxPool         → 30×30
+      Block 2: XceptionModule(16→32)  stride-2 MaxPool         → 15×15
+      Block 3: XceptionModule(32→64)  stride-2 MaxPool         →  8×8
+      Block 4: XceptionModule(64→128) stride-2 MaxPool         →  4×4
+      Head:    Conv(128→7, same) → GlobalAvgPool               →  7
     """
-    def __init__(self):
-        super(EmotionCNN, self).__init__()
-        
-        # Block 1: Conv -> BN -> ReLU -> Pool
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.relu1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)  # Output: 32 x 24 x 24
-        
-        # Block 2: Conv -> BN -> ReLU -> Pool
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.relu2 = nn.ReLU()
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)  # Output: 64 x 12 x 12
-        
-        # Block 3: Conv -> BN -> ReLU -> Pool
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-        self.relu3 = nn.ReLU()
-        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)  # Output: 128 x 6 x 6
-        
-        # Classifier
-        self.fc1 = nn.Linear(128 * 6 * 6, 128)
-        self.relu_fc = nn.ReLU()
-        self.dropout = nn.Dropout(0.3)
-        self.fc2 = nn.Linear(128, 7)
+    def __init__(self, num_classes=7):
+        super().__init__()
+        # Two valid-padded (no padding) 3×3 convs reduce 64→62→60
+        self.base = nn.Sequential(
+            nn.Conv2d(1, 8, 3, bias=False),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, 8, 3, bias=False),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+        )
+        self.block1 = XceptionModule(8,   16)
+        self.block2 = XceptionModule(16,  32)
+        self.block3 = XceptionModule(32,  64)
+        self.block4 = XceptionModule(64, 128)
+        self.conv_pred = nn.Conv2d(128, num_classes, 3, padding=1)
+        self.gap       = nn.AdaptiveAvgPool2d(1)
 
     def forward(self, x):
-        # Feature extraction
-        x = self.pool1(self.relu1(self.bn1(self.conv1(x))))
-        x = self.pool2(self.relu2(self.bn2(self.conv2(x))))
-        x = self.pool3(self.relu3(self.bn3(self.conv3(x))))
-        
-        # Flatten
-        x = x.view(-1, 128 * 6 * 6)
-        
-        # Classification
-        x = self.relu_fc(self.fc1(x))
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
+        x = self.base(x)
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.block3(x)
+        x = self.block4(x)
+        x = self.conv_pred(x)
+        x = self.gap(x)
+        return x.view(x.size(0), -1)
+
 
 def get_model_size(model):
-    """Calculates and returns the total number of trainable parameters in the model."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+
 if __name__ == "__main__":
-    # Rapid shape validation and parameters count check
     model = EmotionCNN()
-    test_input = torch.randn(2, 1, 48, 48)
-    test_output = model(test_input)
-    
-    print("Model initialized successfully!")
-    print(f"Input shape: {test_input.shape}")
-    print(f"Output shape: {test_output.shape}")
-    print(f"Trainable parameters: {get_model_size(model):,}")
+    x = torch.randn(2, 1, 64, 64)
+    y = model(x)
+    print(f"Input:  {x.shape}")
+    print(f"Output: {y.shape}")
+    print(f"Params: {get_model_size(model):,}")
