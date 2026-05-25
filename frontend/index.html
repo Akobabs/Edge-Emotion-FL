@@ -25,9 +25,26 @@
         <button class="tab-btn active" id="tab-webcam" onclick="switchTab('webcam')">
             <span>📹</span> Live Webcam Mode
         </button>
+        <button class="tab-btn" id="tab-photo" onclick="switchTab('photo')">
+            <span>📷</span> Photo Analysis
+        </button>
         <button class="tab-btn" id="tab-dashboard" onclick="switchTab('dashboard')">
             <span>📊</span> Metrics Dashboard
         </button>
+    </div>
+
+    <!-- Model Toggle Bar -->
+    <div class="model-toggle-bar">
+        <span class="toggle-label">Active Model:</span>
+        <div class="toggle-pill">
+            <button class="toggle-option active" id="toggle-fl" onclick="switchActiveModel('fl')">
+                🔗 Federated Learning
+            </button>
+            <button class="toggle-option" id="toggle-standalone" onclick="switchActiveModel('standalone')">
+                ⚡ Standalone
+            </button>
+        </div>
+        <span class="model-badge" id="model-badge">FEDERATED · PRIVACY-PRESERVING</span>
     </div>
 
     <!-- TAB 1: WEBCAM MODE -->
@@ -153,13 +170,97 @@
         </div>
     </div>
 
-    <!-- TAB 2: METRICS DASHBOARD -->
+    <!-- TAB 2: PHOTO ANALYSIS -->
+    <div id="content-photo" class="tab-content">
+        <div class="photo-grid">
+
+            <!-- Left: Upload / Capture Panel -->
+            <div class="glass-panel photo-input-card">
+                <h3 class="panel-title">📸 Image Input</h3>
+
+                <!-- Webcam Snapshot -->
+                <div class="photo-section">
+                    <p class="section-label">Capture from Webcam</p>
+                    <button class="btn-primary" id="btn-capture" onclick="captureFromWebcam()">
+                        Capture Frame
+                    </button>
+                    <p class="hint-text">Takes a still from the live webcam feed</p>
+                </div>
+
+                <div class="divider-or"><span>OR</span></div>
+
+                <!-- File Upload -->
+                <div class="photo-section">
+                    <p class="section-label">Upload an Image</p>
+                    <label class="upload-zone" id="upload-zone" for="file-input">
+                        <span class="upload-icon">⬆</span>
+                        <span class="upload-text">Click or drag &amp; drop a photo</span>
+                        <span class="upload-hint">JPG, PNG, WEBP — face visible, well-lit</span>
+                    </label>
+                    <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="handleFileUpload(this.files[0])">
+                </div>
+
+                <!-- Captured / Uploaded Preview -->
+                <div id="photo-preview-wrapper" class="photo-preview-wrapper" style="display:none;">
+                    <p class="section-label" style="margin-bottom:0.5rem;">Preview</p>
+                    <div class="photo-preview-frame">
+                        <img id="photo-preview-img" src="" alt="Uploaded photo preview">
+                        <div class="scan-overlay" style="position:absolute;"></div>
+                    </div>
+                    <button class="btn-clear" onclick="clearPhoto()">✕ Clear</button>
+                </div>
+            </div>
+
+            <!-- Right: Results Panel -->
+            <div class="glass-panel results-panel" id="photo-results-panel">
+                <div class="primary-emotion-card" id="photo-emotion-card">
+                    <div class="emotion-text-group">
+                        <span class="label-title">Detected Emotion</span>
+                        <span id="photo-detected-emotion">--</span>
+                    </div>
+                    <div class="confidence-badge" id="photo-confidence-val">--</div>
+                </div>
+
+                <!-- 7-class bars -->
+                <div class="bars-container">
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Angry 😡</span><span class="bar-value" id="pval-angry">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-angry" style="width:0%"></div></div></div>
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Disgust 🤢</span><span class="bar-value" id="pval-disgust">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-disgust" style="width:0%"></div></div></div>
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Fear 😨</span><span class="bar-value" id="pval-fear">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-fear" style="width:0%"></div></div></div>
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Happy 😊</span><span class="bar-value" id="pval-happy">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-happy" style="width:0%"></div></div></div>
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Sad 😢</span><span class="bar-value" id="pval-sad">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-sad" style="width:0%"></div></div></div>
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Surprise 😲</span><span class="bar-value" id="pval-surprise">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-surprise" style="width:0%"></div></div></div>
+                    <div class="bar-row"><div class="bar-labels"><span class="bar-name">Neutral 😐</span><span class="bar-value" id="pval-neutral">0%</span></div><div class="progress-track"><div class="progress-fill" id="pfill-neutral" style="width:0%"></div></div></div>
+                </div>
+
+                <!-- Idle / analyzing state -->
+                <div id="photo-idle-msg" class="photo-idle-msg">
+                    <span>📷</span>
+                    <p>Capture or upload a photo to analyse emotion</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-panel instructions-panel" style="border-left-color: var(--color-secondary);">
+            <h4>📷 On-Device Photo Emotion Analysis</h4>
+            <p>
+                Snap a still frame from your webcam or upload any face photograph. The ONNX model runs
+                entirely in your browser — no image data is sent to any server. The centre-crop region is
+                downscaled to 48×48 greyscale before inference, matching the model's training distribution.
+            </p>
+        </div>
+    </div>
+
+    <!-- TAB 3: METRICS DASHBOARD -->
     <div id="content-dashboard" class="tab-content">
-        <!-- Stats Summary Bar -->
+        <!-- Stats Summary Bar Row 1 -->
         <div class="dashboard-grid">
             <div class="glass-panel stat-card">
                 <div class="stat-title">Global Accuracy</div>
                 <div class="stat-val primary" id="stat-accuracy">--</div>
+            </div>
+            <div class="glass-panel stat-card">
+                <div class="stat-title">Macro F1 Score</div>
+                <div class="stat-val primary" id="stat-f1">--</div>
             </div>
             <div class="glass-panel stat-card">
                 <div class="stat-title">Rounds Completed</div>
@@ -169,13 +270,28 @@
                 <div class="stat-title">Attacks Blocked (LBAA)</div>
                 <div class="stat-val danger" id="stat-blocked">--</div>
             </div>
+        </div>
+        <!-- Stats Summary Bar Row 2 -->
+        <div class="dashboard-grid" style="margin-top:0; margin-bottom:2rem;">
+            <div class="glass-panel stat-card">
+                <div class="stat-title">Attack Detection Rate</div>
+                <div class="stat-val success" id="stat-adr">--</div>
+            </div>
+            <div class="glass-panel stat-card">
+                <div class="stat-title">False Positive Rate</div>
+                <div class="stat-val warning" id="stat-fpr">--</div>
+            </div>
+            <div class="glass-panel stat-card">
+                <div class="stat-title">DP Privacy Budget (ε)</div>
+                <div class="stat-val secondary" id="stat-epsilon">--</div>
+            </div>
             <div class="glass-panel stat-card">
                 <div class="stat-title">Comm Saved (Overhead)</div>
                 <div class="stat-val success" id="stat-overhead">--</div>
             </div>
         </div>
 
-        <!-- Chart Columns -->
+        <!-- Chart Columns Row 1 -->
         <div class="charts-grid">
             <!-- Chart 1: Global Convergence -->
             <div class="glass-panel chart-card">
@@ -190,6 +306,25 @@
                 <h3>Adversarial Defense (LBAAFedAvg Block Count)</h3>
                 <div class="chart-wrapper">
                     <canvas id="chart-security"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chart Columns Row 2 -->
+        <div class="charts-grid" style="margin-top: 2rem;">
+            <!-- Chart 3: F1 Scores over Rounds -->
+            <div class="glass-panel chart-card">
+                <h3>F1 Score Convergence (Macro & Weighted)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="chart-f1"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 4: Per-Class F1 (Final Round) -->
+            <div class="glass-panel chart-card">
+                <h3>Per-Class F1 Score (Final Round)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="chart-perclass"></canvas>
                 </div>
             </div>
         </div>
