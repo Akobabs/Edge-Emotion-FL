@@ -1,32 +1,57 @@
 import os
 import json
+import math
 import torch
 import torch.nn as nn
 from collections import OrderedDict
 import numpy as np
 import copy
 from torch.utils.data import DataLoader
+from sklearn.metrics import (
+    f1_score, precision_score, recall_score,
+    confusion_matrix, classification_report
+)
 
 from backend.dataset.data_loader import get_federated_loaders
 from backend.models.cnn import EmotionCNN, get_model_size
 
 # Hyperparameters for simulation
 NUM_CLIENTS = 5
-NUM_ROUNDS = 10
+NUM_ROUNDS = 15
 LOCAL_EPOCHS = 2
-LEARNING_RATE = 0.01
-FEDPROX_MU = 0.15
+LEARNING_RATE = 0.001
+FEDPROX_MU = 0.01
+BATCH_SIZE = 64
+MAX_SAMPLES_PER_CLIENT = 2500   # cap per client so CPU finishes in ~15 min
 
 # Differential Privacy parameters
 DP_ENABLED = True
-DP_NORM_CLIP = 1.2
-DP_NOISE_MULTIPLIER = 0.05  # Calibrated sigma noise
+DP_NORM_CLIP = 1.0
+DP_NOISE_MULTIPLIER = 0.1   # σ — noise per-param is σ*S/√N so total noise L2 = σ*S
 
 # Attacker/Poisoning configurations
 ATTACKER_CID = 4            # Client 4 will act as the malicious stealth attacker
 ATTACK_TYPE = "sign_flip"   # "sign_flip" or "random_noise" or "label_flip"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Emotion class names (FER-2013 order)
+EMOTION_NAMES = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
+
+
+def compute_dp_epsilon(rounds_completed: int, noise_multiplier: float,
+                       delta: float = 1e-5) -> float:
+    """
+    Approximate accumulated DP epsilon using advanced composition of the Gaussian
+    mechanism.  Each round contributes one mechanism application per benign client.
+    Formula (Theorem 3.3, Dwork & Roth):
+        ε_total ≈ sqrt(2 * T * ln(1/δ)) / σ
+    where σ = noise_multiplier (sensitivity-normalised std dev) and T = rounds.
+    """
+    if noise_multiplier <= 0 or rounds_completed <= 0:
+        return float('inf')
+    return round(math.sqrt(2 * rounds_completed * math.log(1.0 / delta)) / noise_multiplier, 3)
+
 
 class LBAAFedAvgAggregator:
     """
@@ -167,52 +192,51 @@ class LBAAFedAvgAggregator:
         return aggregated
 
 
-def train_local_client(client_idx: int, global_model: nn.Module, train_loader: DataLoader, 
-                       epochs: int, lr: float, mu: float, dp_enabled: bool, 
+def train_local_client(client_idx: int, global_model: nn.Module, train_loader: DataLoader,
+                       epochs: int, lr: float, mu: float, dp_enabled: bool,
                        dp_clip: float, dp_noise: float, attacker: bool, attack_type: str) -> tuple:
     """Trains a simulated local client incorporating FedProx, local DP, and poisoning options."""
-    # Clone global model for training and proximal constraint reference
     local_model = copy.deepcopy(global_model).to(DEVICE)
-    ref_model = copy.deepcopy(global_model).to(DEVICE)
+    ref_model   = copy.deepcopy(global_model).to(DEVICE)
     ref_model.eval()
-    
+
     local_model.train()
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(local_model.parameters(), lr=lr, momentum=0.9)
-    
-    # Save original global weights as list of numpy arrays (explicit copy to break memory view reference)
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    optimizer = torch.optim.Adam(local_model.parameters(), lr=lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr * 0.1)
+
     global_weights = [p.data.cpu().numpy().copy() for p in local_model.parameters()]
-    
+
     running_loss = 0.0
     correct = 0
     total = 0
-    
+
     for epoch in range(epochs):
         for images, labels in train_loader:
             images, labels = images.to(DEVICE), labels.to(DEVICE)
-            
-            # Attacker simulation: label flip (e.g. flip class 3 [Happy] to class 4 [Sad])
+
             if attacker and attack_type == "label_flip":
                 labels = torch.where(labels == 3, torch.tensor(4).to(DEVICE), labels)
-                
+
             optimizer.zero_grad()
             outputs = local_model(images)
-            loss = criterion(outputs, labels)
-            
-            # FedProx proximal penalty
-            # 0.5 * mu * || w - w^t ||_2^2
-            prox_term = 0.0
-            for local_param, ref_param in zip(local_model.parameters(), ref_model.parameters()):
-                prox_term += torch.sum((local_param - ref_param) ** 2)
-                
-            total_loss = loss + 0.5 * mu * prox_term
-            total_loss.backward()
+            loss    = criterion(outputs, labels)
+
+            # FedProx proximal penalty: 0.5 * mu * ||w - w^t||^2
+            prox_term = sum(
+                torch.sum((lp - rp) ** 2)
+                for lp, rp in zip(local_model.parameters(), ref_model.parameters())
+            )
+            (loss + 0.5 * mu * prox_term).backward()
+            torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=5.0)
             optimizer.step()
-            
+
             running_loss += loss.item() * images.size(0)
             _, predicted = outputs.max(1)
-            total += labels.size(0)
+            total   += labels.size(0)
             correct += predicted.eq(labels).sum().item()
+
+        scheduler.step()
             
     # Extract weights after training (explicit copy to break memory view reference)
     local_weights = [p.data.cpu().numpy().copy() for p in local_model.parameters()]
@@ -222,22 +246,20 @@ def train_local_client(client_idx: int, global_model: nn.Module, train_loader: D
     
     # Apply Client-Side Differential Privacy (DP)
     if dp_enabled and not attacker:
-        # Compute total L2 norm of the update across all layers
+        # L2 norm clipping
         total_norm = np.sqrt(sum(np.sum(d ** 2) for d in delta))
-        
-        # L2 Norm Clipping
         clip_factor = min(1.0, dp_clip / (total_norm + 1e-10))
         clipped_delta = [d * clip_factor for d in delta]
-        
-        # Add Calibrated Gaussian Noise
-        noised_delta = []
-        for cd in clipped_delta:
-            noise = np.random.normal(
-                loc=0.0,
-                scale=dp_noise * dp_clip,
-                size=cd.shape
-            )
-            noised_delta.append(cd + noise)
+
+        # Noise scale normalised by sqrt(total params) so that total noise
+        # L2 ≈ dp_noise * dp_clip regardless of model size.
+        total_params = sum(d.size for d in clipped_delta)
+        per_param_sigma = (dp_noise * dp_clip) / np.sqrt(total_params)
+
+        noised_delta = [
+            cd + np.random.normal(0.0, per_param_sigma, size=cd.shape)
+            for cd in clipped_delta
+        ]
         delta = noised_delta
         
     # Apply Attacker weight poisoning
@@ -266,11 +288,14 @@ def main():
     
     # 1. Load Data partitions
     print("\nPreparing Non-IID datasets across clients...")
+    # Use the authoritative FER-2013 competition CSV (same data as the reference codebase)
+    csv_path = "DATA/FER2013/fer2013/fer2013/fer2013.csv"
     client_loaders, test_loader = get_federated_loaders(
-        csv_path=None,  # Fallback synthetic generator
+        csv_path=csv_path,
         num_clients=NUM_CLIENTS,
-        alpha=0.5,       # Non-IID skew parameter
-        batch_size=32
+        alpha=0.5,
+        batch_size=BATCH_SIZE,
+        max_samples_per_client=MAX_SAMPLES_PER_CLIENT
     )
     
     # 2. Initialize global model and aggregator
@@ -284,8 +309,18 @@ def main():
     rounds_list = []
     accuracies = []
     losses = []
+    macro_f1_list = []
+    weighted_f1_list = []
+    precision_list = []
+    recall_list = []
+    dp_epsilon_list = []
+    adr_list = []       # attack detection rate per round
+    fpr_list = []       # false positive rate per round
     cumulative_overhead = 0.0
     overhead_mb_list = []
+    final_confusion_matrix = None
+    final_per_class_f1 = None
+    final_classification_report = None
     
     # 3. Main Federated Training Loop
     for r in range(1, NUM_ROUNDS + 1):
@@ -333,35 +368,76 @@ def main():
         for p, val in zip(global_model.parameters(), new_global_weights):
             p.data = torch.tensor(val, dtype=torch.float32).to(DEVICE)
         
-        # 5. Centralized Evaluation
+        # 5. Centralized Evaluation with full classification metrics
         global_model.eval()
         criterion = nn.CrossEntropyLoss()
         running_loss = 0.0
-        correct = 0
-        total = 0
-        
+        all_preds = []
+        all_labels = []
+
         with torch.no_grad():
             for images, labels in test_loader:
                 images, labels = images.to(DEVICE), labels.to(DEVICE)
                 outputs = global_model(images)
                 loss = criterion(outputs, labels)
-                
+
                 running_loss += loss.item() * images.size(0)
                 _, predicted = outputs.max(1)
-                total += labels.size(0)
-                correct += predicted.eq(labels).sum().item()
-                
+                all_preds.extend(predicted.cpu().numpy().tolist())
+                all_labels.extend(labels.cpu().numpy().tolist())
+
+        all_preds = np.array(all_preds)
+        all_labels = np.array(all_labels)
+        total = len(all_labels)
+
         test_loss = running_loss / max(total, 1)
-        test_accuracy = correct / max(total, 1)
-        
-        print(f"\n[SERVER Round {r}] Centralized Evaluation - "
-              f"Loss: {test_loss:.4f}, Accuracy: {test_accuracy:.2%}")
-              
+        test_accuracy = float(np.mean(all_preds == all_labels))
+
+        # Classification metrics
+        macro_f1   = float(f1_score(all_labels, all_preds, average='macro', zero_division=0))
+        weighted_f1 = float(f1_score(all_labels, all_preds, average='weighted', zero_division=0))
+        macro_prec  = float(precision_score(all_labels, all_preds, average='macro', zero_division=0))
+        macro_rec   = float(recall_score(all_labels, all_preds, average='macro', zero_division=0))
+
+        # DP privacy budget (accumulated)
+        epsilon = compute_dp_epsilon(r, DP_NOISE_MULTIPLIER) if DP_ENABLED else float('inf')
+
+        # Attack detection metrics for this round
+        # ADR = fraction of true attacker rounds that were actually blocked
+        true_attacker_blocked = (str(ATTACKER_CID) in blocked_cids)
+        adr = 1.0 if true_attacker_blocked else 0.0
+        # FPR = benign clients incorrectly blocked / total benign clients
+        benign_blocked = sum(1 for cid in blocked_cids if int(cid) != ATTACKER_CID)
+        fpr = benign_blocked / max(1, NUM_CLIENTS - 1)
+
+        print(f"\n[SERVER Round {r}] Evaluation - "
+              f"Loss: {test_loss:.4f} | Accuracy: {test_accuracy:.2%} | "
+              f"Macro-F1: {macro_f1:.4f} | Weighted-F1: {weighted_f1:.4f} | "
+              f"Precision: {macro_prec:.4f} | Recall: {macro_rec:.4f} | "
+              f"DP eps: {epsilon:.2f} | ADR: {adr:.0%} | FPR: {fpr:.0%}")
+
         # Accumulate metrics
         rounds_list.append(r)
         accuracies.append(test_accuracy)
         losses.append(test_loss)
-        
+        macro_f1_list.append(macro_f1)
+        weighted_f1_list.append(weighted_f1)
+        precision_list.append(macro_prec)
+        recall_list.append(macro_rec)
+        dp_epsilon_list.append(epsilon)
+        adr_list.append(adr)
+        fpr_list.append(fpr)
+
+        # Retain confusion matrix and per-class F1 for the final round
+        final_confusion_matrix = confusion_matrix(all_labels, all_preds).tolist()
+        per_class_f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+        final_per_class_f1 = [round(float(v), 4) for v in per_class_f1]
+        final_classification_report = classification_report(
+            all_labels, all_preds,
+            target_names=EMOTION_NAMES,
+            zero_division=0
+        )
+
         # Compute communication cost: each client downloads + uploads model
         round_overhead = 2 * model_size_mb * NUM_CLIENTS
         cumulative_overhead += round_overhead
@@ -374,18 +450,43 @@ def main():
     blocked_cids_list = [log["blocked_cids"] for log in aggregator.round_history]
     total_clients_round = [log["total_clients"] for log in aggregator.round_history]
     
+    # Print final classification report
+    print("\n[FINAL ROUND] Per-Class Classification Report:")
+    print(final_classification_report)
+
     metrics_log = {
         "rounds": rounds_list,
         "accuracy": [round(float(a), 4) for a in accuracies],
         "loss": [round(float(l), 4) for l in losses],
+        # --- NEW: classification metrics per round ---
+        "macro_f1": [round(float(v), 4) for v in macro_f1_list],
+        "weighted_f1": [round(float(v), 4) for v in weighted_f1_list],
+        "macro_precision": [round(float(v), 4) for v in precision_list],
+        "macro_recall": [round(float(v), 4) for v in recall_list],
+        # --- NEW: per-class F1 at final round ---
+        "per_class_f1_final": final_per_class_f1,
+        "emotion_names": EMOTION_NAMES,
+        # --- NEW: confusion matrix at final round ---
+        "confusion_matrix_final": final_confusion_matrix,
+        # --- NEW: differential privacy budget ---
+        "dp_epsilon": [round(float(v), 3) for v in dp_epsilon_list],
+        # --- NEW: attack detection metrics ---
+        "attack_detection_rate": [round(float(v), 4) for v in adr_list],
+        "false_positive_rate": [round(float(v), 4) for v in fpr_list],
+        # --- existing fields ---
         "total_clients": total_clients_round,
         "anomalous_clients": anomalous_counts,
         "blocked_cids": blocked_cids_list,
         "communication_overhead_mb": overhead_mb_list,
         "model_parameters": model_params_count,
         "model_size_mb": round(model_size_mb, 2),
+        "num_clients": NUM_CLIENTS,
+        "local_epochs": LOCAL_EPOCHS,
+        "learning_rate": LEARNING_RATE,
+        "batch_size": BATCH_SIZE,
         "mu_fedprox": FEDPROX_MU,
         "dp_enabled": DP_ENABLED,
+        "dp_norm_clip": DP_NORM_CLIP,
         "dp_noise_multiplier": DP_NOISE_MULTIPLIER,
         "attacker_cid": str(ATTACKER_CID),
         "attack_type": ATTACK_TYPE
