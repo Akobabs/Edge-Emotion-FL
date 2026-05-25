@@ -47,8 +47,8 @@ python -m pip install --upgrade pip
 echo Installing PyTorch CPU wheel...
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-echo Installing Flower, ONNX, Pandas, Matplotlib, and ONNX Script...
-python -m pip install "flwr[simulation]" onnx pandas matplotlib onnxscript
+echo Installing Flower, ONNX, Pandas, Matplotlib, ONNX Script, Scikit-Learn, and Seaborn...
+python -m pip install "flwr[simulation]" onnx pandas matplotlib onnxscript scikit-learn seaborn
 echo.
 
 :: 4. Run the Federated Learning Simulation
