@@ -50,6 +50,11 @@ function checkCORS() {
 
 // 1. Initialize Webcam access
 async function startWebcam(mode) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Camera API not available. Make sure you are using localhost or HTTPS.");
+        return;
+    }
+
     if (!webcamStream) {
         try {
             webcamStream = await navigator.mediaDevices.getUserMedia({
@@ -67,6 +72,7 @@ async function startWebcam(mode) {
     if (mode === 'live') {
         const video = document.getElementById('webcam-video');
         video.srcObject = webcamStream;
+        video.play().catch(e => console.error("Video play error:", e));
         document.getElementById('webcam-start-overlay').style.display = 'none';
         document.getElementById('live-scan-overlay').style.display = 'block';
         
@@ -77,6 +83,7 @@ async function startWebcam(mode) {
     } else if (mode === 'photo') {
         const photoVideo = document.getElementById('photo-webcam-video');
         photoVideo.srcObject = webcamStream;
+        photoVideo.play().catch(e => console.error("Video play error:", e));
         document.getElementById('btn-start-photo-webcam').style.display = 'none';
         document.getElementById('photo-webcam-container').style.display = 'block';
         document.getElementById('btn-capture').style.display = 'inline-block';
