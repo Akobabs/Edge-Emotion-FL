@@ -9,6 +9,9 @@
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
     <!-- Chart.js for High-Fidelity Data Plotting -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Cropper.js for Image Editing -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
 </head>
 <body>
 
@@ -37,14 +40,14 @@
     <div class="model-toggle-bar">
         <span class="toggle-label">Active Model:</span>
         <div class="toggle-pill">
-            <button class="toggle-option active" id="toggle-fl" onclick="switchActiveModel('fl')">
+            <button class="toggle-option" id="toggle-fl" onclick="switchActiveModel('fl')">
                 🔗 Federated Learning
             </button>
-            <button class="toggle-option" id="toggle-standalone" onclick="switchActiveModel('standalone')">
+            <button class="toggle-option active" id="toggle-standalone" onclick="switchActiveModel('standalone')">
                 ⚡ Standalone
             </button>
         </div>
-        <span class="model-badge" id="model-badge">FEDERATED · PRIVACY-PRESERVING</span>
+        <span class="model-badge" id="model-badge">STANDALONE · CENTRALIZED</span>
     </div>
 
     <!-- TAB 1: WEBCAM MODE -->
@@ -55,8 +58,12 @@
                 <div class="scanner-viewport">
                     <video id="webcam-video" autoplay playsinline muted></video>
                     <!-- Floating scanning bounding box and laser line -->
-                    <div class="scan-overlay">
+                    <div class="scan-overlay" id="live-scan-overlay" style="display: none;">
                         <div class="scan-line"></div>
+                    </div>
+                    <!-- Start Webcam Overlay -->
+                    <div id="webcam-start-overlay" class="webcam-start-overlay">
+                        <button class="btn-primary" onclick="startWebcam('live')">📸 Start Webcam</button>
                     </div>
                     <!-- Camera Status -->
                     <div class="status-bar">
@@ -181,7 +188,13 @@
                 <!-- Webcam Snapshot -->
                 <div class="photo-section">
                     <p class="section-label">Capture from Webcam</p>
-                    <button class="btn-primary" id="btn-capture" onclick="captureFromWebcam()">
+                    <div class="photo-webcam-container" id="photo-webcam-container" style="display: none; position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 1rem; border: 1px solid var(--border-color);">
+                        <video id="photo-webcam-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);"></video>
+                    </div>
+                    <button class="btn-primary" id="btn-start-photo-webcam" onclick="startWebcam('photo')">
+                        Start Webcam
+                    </button>
+                    <button class="btn-primary" id="btn-capture" onclick="captureFromWebcam()" style="display: none;">
                         Capture Frame
                     </button>
                     <p class="hint-text">Takes a still from the live webcam feed</p>
@@ -202,12 +215,14 @@
 
                 <!-- Captured / Uploaded Preview -->
                 <div id="photo-preview-wrapper" class="photo-preview-wrapper" style="display:none;">
-                    <p class="section-label" style="margin-bottom:0.5rem;">Preview</p>
-                    <div class="photo-preview-frame">
-                        <img id="photo-preview-img" src="" alt="Uploaded photo preview">
-                        <div class="scan-overlay" style="position:absolute;"></div>
+                    <p class="section-label" style="margin-bottom:0.5rem;">Preview & Edit (Crop Face)</p>
+                    <div class="photo-preview-frame" style="background: transparent; border: none; overflow: visible;">
+                        <img id="photo-preview-img" src="" alt="Uploaded photo preview" style="max-width: 100%; display: block;">
                     </div>
-                    <button class="btn-clear" onclick="clearPhoto()">✕ Clear</button>
+                    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                        <button class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.9rem;" onclick="analyzeCroppedImage()">Analyze Frame</button>
+                        <button class="btn-clear" style="margin-top: 0;" onclick="clearPhoto()">✕ Clear</button>
+                    </div>
                 </div>
             </div>
 
