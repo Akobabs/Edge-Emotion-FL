@@ -2,7 +2,8 @@
 let session = null;
 let webcamStream = null;
 let charts = {};
-let currentModelType = 'fl';   // 'fl' | 'standalone'
+let currentModelType = 'standalone';   // 'fl' | 'standalone'
+let cropperInstance = null;
 const EMOTIONS = ["Angry 😡", "Disgust 🤢", "Fear 😨", "Happy 😊", "Sad 😢", "Surprise 😲", "Neutral 😐"];
 const EMOTION_KEYS = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"];
 
@@ -19,9 +20,8 @@ const MODEL_BADGE_TEXT = {
 // Initialize Application
 window.addEventListener('DOMContentLoaded', async () => {
     checkCORS();
-    await initWebcam();
-    await loadONNXModel(MODEL_PATHS.fl);
-    loadDashboardMetrics('fl');
+    await loadONNXModel(MODEL_PATHS.standalone);
+    loadDashboardMetrics('standalone');
     initPhotoTab();
 
     // Start continuous inference
@@ -49,28 +49,37 @@ function checkCORS() {
 }
 
 // 1. Initialize Webcam access
-async function initWebcam() {
-    const video = document.getElementById('webcam-video');
-    const cameraDot = document.getElementById('camera-dot');
-    const cameraStatus = document.getElementById('camera-status');
+async function startWebcam(mode) {
+    if (!webcamStream) {
+        try {
+            webcamStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+                audio: false
+            });
+            console.log("Webcam stream started successfully.");
+        } catch (err) {
+            console.error("Webcam access failed: ", err);
+            alert("Please grant webcam permissions to demonstrate live emotion classification.");
+            return;
+        }
+    }
     
-    try {
-        webcamStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                width: { ideal: 640 },
-                height: { ideal: 480 },
-                facingMode: 'user'
-            },
-            audio: false
-        });
+    if (mode === 'live') {
+        const video = document.getElementById('webcam-video');
         video.srcObject = webcamStream;
+        document.getElementById('webcam-start-overlay').style.display = 'none';
+        document.getElementById('live-scan-overlay').style.display = 'block';
+        
+        const cameraDot = document.getElementById('camera-dot');
+        const cameraStatus = document.getElementById('camera-status');
         cameraDot.classList.add('active');
         cameraStatus.textContent = "Camera Online";
-        console.log("Webcam stream started successfully.");
-    } catch (err) {
-        console.error("Webcam access failed: ", err);
-        cameraStatus.textContent = "Camera Blocked";
-        alert("Please grant webcam permissions to demonstrate live emotion classification.");
+    } else if (mode === 'photo') {
+        const photoVideo = document.getElementById('photo-webcam-video');
+        photoVideo.srcObject = webcamStream;
+        document.getElementById('btn-start-photo-webcam').style.display = 'none';
+        document.getElementById('photo-webcam-container').style.display = 'block';
+        document.getElementById('btn-capture').style.display = 'inline-block';
     }
 }
 
@@ -241,9 +250,9 @@ function initPhotoTab() {
 
 // Capture a still frame from the live webcam
 function captureFromWebcam() {
-    const video = document.getElementById('webcam-video');
+    const video = document.getElementById('photo-webcam-video');
     if (!video.srcObject) {
-        alert('Webcam is not active. Please enable the webcam on the Live Webcam tab first.');
+        alert('Webcam is not active. Please click Start Webcam first.');
         return;
     }
     const canvas = document.createElement('canvas');
@@ -252,7 +261,6 @@ function captureFromWebcam() {
     canvas.getContext('2d').drawImage(video, 0, 0);
     const dataURL = canvas.toDataURL('image/png');
     showPhotoPreview(dataURL);
-    runPhotoInference(canvas);
 }
 
 // Handle uploaded image file
@@ -260,27 +268,38 @@ function handleFileUpload(file) {
     if (!file || !file.type.startsWith('image/')) return;
     const reader = new FileReader();
     reader.onload = e => {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            canvas.getContext('2d').drawImage(img, 0, 0);
-            showPhotoPreview(e.target.result);
-            runPhotoInference(canvas);
-        };
-        img.src = e.target.result;
+        showPhotoPreview(e.target.result);
     };
     reader.readAsDataURL(file);
 }
 
 function showPhotoPreview(dataURL) {
-    document.getElementById('photo-preview-img').src = dataURL;
+    const img = document.getElementById('photo-preview-img');
+    
+    if (cropperInstance) {
+        cropperInstance.destroy();
+        cropperInstance = null;
+    }
+    
+    img.onload = () => {
+        cropperInstance = new Cropper(img, {
+            aspectRatio: 1, // enforce square crop for 64x64 model
+            viewMode: 1,
+            autoCropArea: 0.8,
+            responsive: true,
+        });
+    };
+    
+    img.src = dataURL;
     document.getElementById('photo-preview-wrapper').style.display = 'block';
     document.getElementById('photo-idle-msg').style.display = 'none';
 }
 
 function clearPhoto() {
+    if (cropperInstance) {
+        cropperInstance.destroy();
+        cropperInstance = null;
+    }
     document.getElementById('photo-preview-img').src = '';
     document.getElementById('photo-preview-wrapper').style.display = 'none';
     document.getElementById('photo-idle-msg').style.display = 'flex';
@@ -292,26 +311,26 @@ function clearPhoto() {
     });
 }
 
-// Run ONNX inference on a canvas element (any size)
+function analyzeCroppedImage() {
+    if (!cropperInstance) return;
+    
+    // Get cropped canvas resized to exactly 64x64 for the model
+    const croppedCanvas = cropperInstance.getCroppedCanvas({
+        width: 64,
+        height: 64
+    });
+    
+    runPhotoInference(croppedCanvas);
+}
+
+// Run ONNX inference on the cropped 64x64 canvas
 async function runPhotoInference(canvas) {
     if (!session) {
         alert('ONNX model is still loading. Please wait a moment and try again.');
         return;
     }
 
-    const offscreen = document.createElement('canvas');
-    offscreen.width = 64;
-    offscreen.height = 64;
-    const ctx = offscreen.getContext('2d');
-
-    // Centre-crop square region then resize to 64×64
-    const w = canvas.width, h = canvas.height;
-    const size = Math.min(w, h);
-    const sx = (w - size) / 2;
-    const sy = (h - size) / 2;
-    ctx.drawImage(canvas, sx, sy, size, size, 0, 0, 64, 64);
-
-    const imgData = ctx.getImageData(0, 0, 64, 64);
+    const imgData = canvas.getContext('2d').getImageData(0, 0, 64, 64);
     const pixels = imgData.data;
     const inputData = new Float32Array(64 * 64);
     for (let i = 0; i < pixels.length; i += 4) {
